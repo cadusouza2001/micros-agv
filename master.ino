@@ -372,9 +372,8 @@ void driveForward()
     }
 }
 
-void turnLeft(bool isAtIntersection)
+void turnLeft()
 {
-    bool rightSensorEnteredFirstLine = false;
     bool rightSensorExitedFirstLine = false;
     bool rightSensorEnteredSecondLine = false;
     bool rightSensorExitedSecondLine = false;
@@ -384,14 +383,8 @@ void turnLeft(bool isAtIntersection)
         // Read from the right sensor
         int hasRightSensorDetectedLine = rightSensorReading;
 
-        // If not at an intersection, check if the left sensor has entered the first line
-        if (isAtIntersection || !rightSensorEnteredFirstLine && hasRightSensorDetectedLine)
-        {
-            rightSensorEnteredFirstLine = true;
-        }
-
         // Check if the right sensor has exited the first line
-        if (rightSensorEnteredFirstLine && !rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
+        if (!rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
         {
             rightSensorExitedFirstLine = true;
         }
@@ -414,9 +407,8 @@ void turnLeft(bool isAtIntersection)
     }
 }
 
-void turnRight(bool isAtIntersection)
+void turnRight()
 {
-    bool leftSensorEnteredFirstLine = false;
     bool leftSensorExitedFirstLine = false;
     bool leftSensorEnteredSecondLine = false;
     bool leftSensorExitedSecondLine = false;
@@ -426,14 +418,8 @@ void turnRight(bool isAtIntersection)
         // Read from the left sensor
         int hasLeftSensorDetectedLine = leftSensorReading;
 
-        // If not at an intersection, check if the left sensor has entered the first line
-        if (isAtIntersection || !leftSensorEnteredFirstLine && hasLeftSensorDetectedLine)
-        {
-            leftSensorEnteredFirstLine = true;
-        }
-
         // Check if the left sensor has exited the first line
-        if (leftSensorEnteredFirstLine && !leftSensorExitedFirstLine && !hasLeftSensorDetectedLine)
+        if (!leftSensorExitedFirstLine && !hasLeftSensorDetectedLine)
         {
             leftSensorExitedFirstLine = true;
         }
@@ -534,17 +520,17 @@ int getNextDirection(Node *nextPosition, Node *currentPosition)
     }
 }
 
-void turnToNewDirection(bool isAtIntersection)
+void turnToNewDirection()
 {
     int directionDifference = nextDirection - currentDirection;
 
     if (directionDifference == 1 || directionDifference == -3)
     {
-        turnRight(isAtIntersection);
+        turnRight();
     }
     else if (directionDifference == -1 || directionDifference == 3)
     {
-        turnLeft(isAtIntersection);
+        turnLeft();
     }
 
     currentDirection = nextDirection;
@@ -682,7 +668,7 @@ void loop()
         handleObstacleAndRecalculateRoute();
         if (currentDirection != nextDirection)
         {
-            turnToNewDirection(false);
+            turnToNewDirection();
         }
     }
     else if (isThereIntersection())
@@ -690,7 +676,7 @@ void loop()
         updateCurrentPosition();
         if (currentDirection != nextDirection)
         {
-            turnToNewDirection(true);
+            turnToNewDirection();
         }
         else
         {
