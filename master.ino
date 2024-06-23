@@ -34,12 +34,17 @@ const int RIGHT_WHEEL_MOVE_FORWARD_PIN = 4;
 const int RIGHT_WHEEL_MOVE_BACKWARD_PIN = 5;
 
 // Infrared sensor pins
-const int IR_LEFT = 10;
-const int IR_RIGHT = 8;
+const int IR_LF_LEFT = 2;
+const int IR_LF_RIGHT = 3;
+const int IR_INTERSECTION_LEFT = 8;
+const int IR_INTERSECTION_RIGHT = 10;
 const int IR_FRONT = 9;
 
 int currentDirection;
 int nextDirection;
+
+volatile bool isLeftLineFollowerDetectingLine;
+volatile bool isRightLineFollowerDetectingLine;
 
 struct Coordinates
 {
@@ -51,6 +56,7 @@ struct Node
 {
     Coordinates position;
     int g;
+    int f;
     Node *parent;
 };
 
@@ -74,23 +80,6 @@ char grid[rows][cols] = {
     {'4', '-', '+', '-', '+', '-', '+', '-', '+', '-', '8'},  // 8
     {' ', ' ', '|', ' ', '|', ' ', '|', ' ', '|', ' ', ' '},  // 9
     {' ', ' ', 'A', ' ', 'B', ' ', 'C', ' ', 'D', ' ', ' '}}; // 10
-
-// Function to find a character in the grid and return its coordinates
-void findCharInGrid(char c, int &x, int &y)
-{
-    for (int i = 0; i < 11; i++)
-    {
-        for (int j = 0; j < 11; j++)
-        {
-            if (grid[i][j] == c)
-            {
-                x = i;
-                y = j;
-                return;
-            }
-        }
-    }
-}
 
 bool isValidMove(struct Coordinates current_pos, struct Coordinates next_pos)
 {
@@ -135,13 +124,21 @@ bool isValidMove(struct Coordinates current_pos, struct Coordinates next_pos)
     return true;
 }
 
-Node *dijkstra(struct Coordinates start, struct Coordinates end)
+// Heuristic function for A*
+int heuristic(struct Coordinates a, struct Coordinates b)
+{
+    return abs(a.row - b.row) + abs(a.col - b.col);
+}
+
+Node *aStar(struct Coordinates start, struct Coordinates end)
 {
     Node *start_node = new Node;
-    start_node->position.row = start.row;
-    start_node->position.col = start.col;
+    start_node->position = start;
     start_node->g = 0;
     start_node->parent = NULL;
+
+    // The f value of the start node is completely heuristic.
+    start_node->f = heuristic(start, end);
 
     Node *open_list[rows * cols];
     int open_list_size = 0;
@@ -154,15 +151,17 @@ Node *dijkstra(struct Coordinates start, struct Coordinates end)
         Node *current_node = open_list[0];
         int current_index = 0;
 
+        // Find the node with the lowest f value
         for (int i = 1; i < open_list_size; i++)
         {
-            if (open_list[i]->g < current_node->g)
+            if (open_list[i]->g + open_list[i]->f < current_node->g + current_node->f)
             {
                 current_node = open_list[i];
                 current_index = i;
             }
         }
 
+        // Remove the current node from the open list
         open_list_size--;
         for (int i = current_index; i < open_list_size; i++)
         {
@@ -171,27 +170,26 @@ Node *dijkstra(struct Coordinates start, struct Coordinates end)
 
         closed_list[current_node->position.row][current_node->position.col] = true;
 
+        // Check if we have reached the goal
         if (current_node->position.row == end.row && current_node->position.col == end.col)
         {
-            return current_node;
+            return current_node; // Path has been found
         }
 
-        int neighbors[4][2] = {
-            {0, 2}, {2, 0}, {0, -2}, {-2, 0} // Possible moves: right, down, left, up
-        };
-
+        // Generate neighbors
+        int neighbors[4][2] = {{0, 2}, {2, 0}, {0, -2}, {-2, 0}}; // Possible moves: right, down, left, up
         for (int i = 0; i < 4; i++)
         {
             Coordinates neighbor_pos = {current_node->position.row + neighbors[i][0], current_node->position.col + neighbors[i][1]};
-
-            if (isValidMove(Coordinates{current_node->position.row, current_node->position.col}, neighbor_pos) && !closed_list[neighbor_pos.row][neighbor_pos.col])
+            if (isValidMove(current_node->position, neighbor_pos) && !closed_list[neighbor_pos.row][neighbor_pos.col])
             {
                 Node *neighbor_node = new Node;
-                neighbor_node->position.row = neighbor_pos.row;
-                neighbor_node->position.col = neighbor_pos.col;
+                neighbor_node->position = neighbor_pos;
                 neighbor_node->g = current_node->g + 1;
+                neighbor_node->f = neighbor_node->g + heuristic(neighbor_pos, end);
                 neighbor_node->parent = current_node;
 
+                // Check if this node is already in the open list with a lower g (cost) value
                 bool skip = false;
                 for (int j = 0; j < open_list_size; j++)
                 {
@@ -208,19 +206,35 @@ Node *dijkstra(struct Coordinates start, struct Coordinates end)
                 }
                 else
                 {
-                    delete neighbor_node;
+                    delete neighbor_node; // Proper memory management
                 }
             }
         }
     }
-    return NULL;
+
+    return NULL; // No path found
 }
 
-// Function to parse the input and find the start and end coordinates
-void parseInput(char startChar, char endChar, int &startX, int &startY, int &endX, int &endY)
+// Function to find a character in the grid and return its coordinates as a Coordinates structure
+Coordinates getCoordinates(char c)
 {
-    findCharInGrid(startChar, startX, startY);
-    findCharInGrid(endChar, endX, endY);
+    Coordinates coord;
+    for (int i = 0; i < 11; i++)
+    {
+        for (int j = 0; j < 11; j++)
+        {
+            if (grid[i][j] == c)
+            {
+                coord.row = i;
+                coord.col = j;
+                return coord;
+            }
+        }
+    }
+    // Return a default value if character is not found
+    coord.row = -1;
+    coord.col = -1;
+    return coord;
 }
 
 int getStartDirection(char startChar)
@@ -268,6 +282,16 @@ void printPath(struct Node *path)
     }
 }
 
+void leftSensorReadingChange()
+{
+    isLeftLineFollowerDetectingLine = !isLeftLineFollowerDetectingLine;
+}
+
+void rightSensorReadingChange()
+{
+    isRightLineFollowerDetectingLine = !isRightLineFollowerDetectingLine;
+}
+
 void setup()
 {
     Serial.begin(9600);
@@ -277,30 +301,25 @@ void setup()
     pinMode(RIGHT_WHEEL_MOVE_FORWARD_PIN, OUTPUT);
     pinMode(RIGHT_WHEEL_MOVE_BACKWARD_PIN, OUTPUT);
 
-    // Example usage with dynamic obstacles
-    int startX, startY, endX, endY;
-    parseInput(START_POSITION, END_POSITION, startX, startY, endX, endY);
+    pinMode(IR_LF_LEFT, INPUT);
+    pinMode(IR_LF_RIGHT, INPUT);
 
-    path = dijkstra(Coordinates{startX, startY}, Coordinates{endX, endY});
+    isLeftLineFollowerDetectingLine = digitalRead(IR_LF_LEFT);
+    isRightLineFollowerDetectingLine = digitalRead(IR_LF_RIGHT);
+
+    attachInterrupt(digitalPinToInterrupt(IR_LF_LEFT), leftSensorReadingChange, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(IR_LF_RIGHT), rightSensorReadingChange, CHANGE);
+
+    // Example usage with dynamic obstacles
+    Coordinates startCoordinates = getCoordinates(START_POSITION);
+    Coordinates endCoordinates = getCoordinates(END_POSITION);
+
+    path = aStar(startCoordinates, endCoordinates);
     currentDirection = getStartDirection(START_POSITION);
     nextDirection = currentDirection;
     printPath(path);
     Serial.print("Starting facing direction: ");
-    switch (currentDirection)
-    {
-    case NORTH:
-        Serial.println("NORTH");
-        break;
-    case EAST:
-        Serial.println("EAST");
-        break;
-    case SOUTH:
-        Serial.println("SOUTH");
-        break;
-    case WEST:
-        Serial.println("WEST");
-        break;
-    }
+    printDirection(currentDirection);
 }
 
 void controlLeftWheel(int command)
@@ -343,49 +362,47 @@ void controlRightWheel(int command)
 
 void driveForward()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_RIGHT);
+    int hasLeftSensorDetectedLine = isLeftLineFollowerDetectingLine;
+    int hasRightSensorDetectedLine = isRightLineFollowerDetectingLine;
 
-    // If only the left sensor detects a line, turn slightly right to realign
-    if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
+    // If both sensors detect a line, drive straight forward
+    if (hasLeftSensorDetectedLine && hasRightSensorDetectedLine)
+    {
+        controlLeftWheel(GO_FORWARD);
+        controlRightWheel(GO_FORWARD);
+    }
+    // If only the left sensor detects a line, turn slightly left to realign
+    else if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
     {
         controlLeftWheel(STOP);
         controlRightWheel(GO_FORWARD);
     }
-    // If only the right sensor detects a line, turn slightly left to realign
+    // If only the right sensor detects a line, turn slightly right to realign
     else if (hasRightSensorDetectedLine && !hasLeftSensorDetectedLine)
     {
         controlLeftWheel(GO_FORWARD);
         controlRightWheel(STOP);
     }
-    // If neither sensor detects a line, drive straight forward
     else
     {
-        controlLeftWheel(GO_FORWARD);
-        controlRightWheel(GO_FORWARD);
+        controlLeftWheel(STOP);
+        controlRightWheel(STOP);
     }
 }
 
-void turnLeft(bool isAtIntersection)
+void turnLeft()
 {
-    bool rightSensorEnteredFirstLine = false;
     bool rightSensorExitedFirstLine = false;
     bool rightSensorEnteredSecondLine = false;
     bool rightSensorExitedSecondLine = false;
 
-    while (!rightSensorExitedSecondLine)
+    while (!rightSensorExitedSecondLine && isRightLineFollowerDetectingLine)
     {
         // Read from the right sensor
-        int hasRightSensorDetectedLine = digitalRead(IR_RIGHT);
-
-        // If not at an intersection, check if the left sensor has entered the first line
-        if (isAtIntersection || !rightSensorEnteredFirstLine && hasRightSensorDetectedLine)
-        {
-            rightSensorEnteredFirstLine = true;
-        }
+        int hasRightSensorDetectedLine = digitalRead(IR_INTERSECTION_RIGHT);
 
         // Check if the right sensor has exited the first line
-        if (rightSensorEnteredFirstLine && !rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
+        if (!rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
         {
             rightSensorExitedFirstLine = true;
         }
@@ -403,31 +420,24 @@ void turnLeft(bool isAtIntersection)
         }
 
         // Turn left
-        controlLeftWheel(STOP);
+        controlLeftWheel(GO_BACK);
         controlRightWheel(GO_FORWARD);
     }
 }
 
-void turnRight(bool isAtIntersection)
+void turnRight()
 {
-    bool leftSensorEnteredFirstLine = false;
     bool leftSensorExitedFirstLine = false;
     bool leftSensorEnteredSecondLine = false;
     bool leftSensorExitedSecondLine = false;
 
-    while (!leftSensorExitedSecondLine)
+    while (!leftSensorExitedSecondLine && isLeftLineFollowerDetectingLine)
     {
         // Read from the left sensor
-        int hasLeftSensorDetectedLine = digitalRead(IR_LEFT);
-
-        // If not at an intersection, check if the left sensor has entered the first line
-        if (isAtIntersection || !leftSensorEnteredFirstLine && hasLeftSensorDetectedLine)
-        {
-            leftSensorEnteredFirstLine = true;
-        }
+        int hasLeftSensorDetectedLine = digitalRead(IR_INTERSECTION_LEFT);
 
         // Check if the left sensor has exited the first line
-        if (leftSensorEnteredFirstLine && !leftSensorExitedFirstLine && !hasLeftSensorDetectedLine)
+        if (!leftSensorExitedFirstLine && !hasLeftSensorDetectedLine)
         {
             leftSensorExitedFirstLine = true;
         }
@@ -446,7 +456,7 @@ void turnRight(bool isAtIntersection)
 
         // Turn right
         controlLeftWheel(GO_FORWARD);
-        controlRightWheel(STOP);
+        controlRightWheel(GO_BACK);
     }
 }
 
@@ -458,8 +468,8 @@ bool isThereObstacle()
 
 bool isThereIntersection()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_RIGHT);
+    int hasLeftSensorDetectedLine = digitalRead(IR_INTERSECTION_LEFT);
+    int hasRightSensorDetectedLine = digitalRead(IR_INTERSECTION_RIGHT);
     return hasLeftSensorDetectedLine && hasRightSensorDetectedLine;
 }
 
@@ -528,17 +538,17 @@ int getNextDirection(Node *nextPosition, Node *currentPosition)
     }
 }
 
-void turnToNewDirection(bool isAtIntersection)
+void turnToNewDirection()
 {
     int directionDifference = nextDirection - currentDirection;
 
     if (directionDifference == 1 || directionDifference == -3)
     {
-        turnRight(isAtIntersection);
+        turnRight();
     }
     else if (directionDifference == -1 || directionDifference == 3)
     {
-        turnLeft(isAtIntersection);
+        turnLeft();
     }
 
     currentDirection = nextDirection;
@@ -595,7 +605,7 @@ void handleObstacleAndRecalculateRoute()
         Coordinates start = {last->position.row, last->position.col};
         Coordinates end = {path->position.row, path->position.col};
         // You might need to implement a way to retrieve or store the end position
-        Node *newPath = dijkstra(start, end);
+        Node *newPath = aStar(start, end);
 
         // Update the path with the new route
         // Make sure to properly delete/free the old path to avoid memory leaks
@@ -633,26 +643,31 @@ void deletePath(Node *node)
 
 void driveBackward()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_RIGHT);
+    int hasLeftSensorDetectedLine = isLeftLineFollowerDetectingLine;
+    int hasRightSensorDetectedLine = isRightLineFollowerDetectingLine;
 
-    // If only the left sensor detects a line, turn slightly right to realign
-    if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
+    // If both sensors detect a line, drive straight backward
+    if (hasLeftSensorDetectedLine && hasRightSensorDetectedLine)
+    {
+        controlLeftWheel(GO_BACK);
+        controlRightWheel(GO_BACK);
+    }
+    // If only the left sensor detects a line, turn slightly left to realign
+    else if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
     {
         controlLeftWheel(STOP);
         controlRightWheel(GO_BACK);
     }
-    // If only the right sensor detects a line, turn slightly left to realign
+    // If only the right sensor detects a line, turn slightly right to realign
     else if (hasRightSensorDetectedLine && !hasLeftSensorDetectedLine)
     {
         controlLeftWheel(GO_BACK);
         controlRightWheel(STOP);
     }
-    // If neither sensor detects a line, drive straight forward
     else
     {
-        controlLeftWheel(GO_BACK);
-        controlRightWheel(GO_BACK);
+        controlLeftWheel(STOP);
+        controlRightWheel(STOP);
     }
 }
 
@@ -670,12 +685,13 @@ void loop()
     driveForward();
     if (isThereObstacle())
     {
-        Serial.println("Obstacle detected!");
+        Serial.println("Obstacle detected! Returning to intersection.");
         goBackToIntersection();
+        Serial.println("Returned to intersection.");
         handleObstacleAndRecalculateRoute();
         if (currentDirection != nextDirection)
         {
-            turnToNewDirection(false);
+            turnToNewDirection();
         }
     }
     else if (isThereIntersection())
@@ -683,7 +699,7 @@ void loop()
         updateCurrentPosition();
         if (currentDirection != nextDirection)
         {
-            turnToNewDirection(true);
+            turnToNewDirection();
         }
         else
         {
