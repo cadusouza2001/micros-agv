@@ -511,6 +511,8 @@ void updateCurrentPosition()
     Serial.print(secondToLast->position.row);
     Serial.print(", ");
     Serial.println(secondToLast->position.col);
+    Serial.print("Current direction: ");
+    printDirection(currentDirection);
     Serial.print("Next direction: ");
     printDirection(nextDirection);
 }
@@ -549,6 +551,12 @@ void turnToNewDirection()
     else if (directionDifference == -1 || directionDifference == 3)
     {
         turnLeft();
+    }
+    else if (directionDifference == 2 || directionDifference == -2)
+    {
+        turnRight();
+        goBackToIntersection();
+        turnRight();
     }
 
     currentDirection = nextDirection;
@@ -626,6 +634,8 @@ void handleObstacleAndRecalculateRoute()
     }
 
     nextDirection = getNextDirection(secondToLast, last);
+    Serial.print("Current direction: ");
+    printDirection(currentDirection);
     Serial.print("Next direction: ");
     printDirection(nextDirection);
 }
@@ -662,11 +672,6 @@ void driveBackward()
     else if (hasRightSensorDetectedLine && !hasLeftSensorDetectedLine)
     {
         controlLeftWheel(GO_BACK);
-        controlRightWheel(STOP);
-    }
-    else
-    {
-        controlLeftWheel(STOP);
         controlRightWheel(STOP);
     }
 }
