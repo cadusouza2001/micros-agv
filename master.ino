@@ -25,6 +25,16 @@ enum
     GO_BACK
 };
 
+enum IRSensorType
+{
+    IR_LF_LEFT,
+    IR_LF_RIGHT,
+    IR_INTERSECTION_LEFT,
+    IR_INTERSECTION_RIGHT,
+    IR_FRONT,
+    NUM_IR_SENSORS
+};
+
 // Left wheel motor control pins
 const int LEFT_WHEEL_MOVE_FORWARD_PIN = 5;
 const int LEFT_WHEEL_MOVE_BACKWARD_PIN = 6;
@@ -34,17 +44,43 @@ const int RIGHT_WHEEL_MOVE_FORWARD_PIN = 9;
 const int RIGHT_WHEEL_MOVE_BACKWARD_PIN = 10;
 
 // Infrared sensor pins
-const int IR_LF_LEFT = 11;
-const int IR_LF_RIGHT = 13;
-const int IR_INTERSECTION_LEFT = 2;
-const int IR_INTERSECTION_RIGHT = 3;
-const int IR_FRONT = 12;
+const int IR_SENSOR_PINS[] = {11,  // IR_LF_LEFT
+                              13,  // IR_LF_RIGHT
+                              2,   // IR_INTERSECTION_LEFT
+                              3,   // IR_INTERSECTION_RIGHT
+                              12}; // IR_FRONT
 
 int currentDirection;
 int nextDirection;
 
-unsigned long lastDebounceTime = 0; // the last time the output pin was toggled
-unsigned long debounceDelay = 100; // the debounce time; increase if the output flickers
+struct Sensor
+{
+    int pin;
+    bool state;
+    bool lastStableState;
+    unsigned long lastDebounceTime;
+};
+
+Sensor irSensors[NUM_IR_SENSORS];
+
+const unsigned long debounceDelay = 100;
+
+bool debounceRead(struct Sensor &sensor)
+{
+    bool reading = digitalRead(sensor.pin);
+    if (reading != sensor.state)
+    {
+        sensor.lastDebounceTime = millis();
+        sensor.state = reading;
+    }
+
+    if ((millis() - sensor.lastDebounceTime) > debounceDelay)
+    {
+        sensor.lastStableState = sensor.state;
+    }
+
+    return sensor.lastStableState;
+}
 
 struct Coordinates
 {
@@ -291,42 +327,18 @@ void setup()
     pinMode(RIGHT_WHEEL_MOVE_FORWARD_PIN, OUTPUT);
     pinMode(RIGHT_WHEEL_MOVE_BACKWARD_PIN, OUTPUT);
 
-    TCCR0A = 0; // Clear Timer/Counter Control Registers
-  TCCR0B = 0;
+    for (int i = 0; i < NUM_IR_SENSORS; ++i)
+    {
+        irSensors[i].pin = IR_SENSOR_PINS[i];
+        irSensors[i].state = LOW;
+        irSensors[i].lastStableState = LOW;
+        irSensors[i].lastDebounceTime = 0;
+        pinMode(irSensors[i].pin, INPUT);
+    }
 
-  // Set PWM mode to Fast PWM
-  TCCR0A |= (1 << WGM00) | (1 << WGM01);
-
-  // Set prescaler to 1 (no prescaling)
-  TCCR0B |= (1 << CS00);
-
-  // Set the output compare registers for 15 kHz frequency
-  OCR0A = 106; // Ajustar duty cycle para o pino 6
-  OCR0B = 106; // Ajustar duty cycle para o pino 5
-
-  // Enable PWM nos pinos 5 e 6
-  TCCR0A |= (1 << COM0A1) | (1 << COM0B1);
-
-  // Configurar Timer1 para 15 kHz nos pinos 9 e 10
-  TCCR1A = 0; // Clear Timer/Counter Control Registers
-  TCCR1B = 0;
-
-  // Set PWM mode to Fast PWM 8-bit
-  TCCR1A |= (1 << WGM10);
-  TCCR1B |= (1 << WGM12);
-
-  // Set prescaler to 1 (no prescaling)
-  TCCR1B |= (1 << CS10);
-
-  // Set the output compare registers for 15 kHz frequency
-  OCR1A = 106; // Ajustar duty cycle para o pino 9
-  OCR1B = 106; // Ajustar duty cycle para o pino 10
-
-  // Enable PWM nos pinos 9 e 10
-  TCCR1A |= (1 << COM1A1) | (1 << COM1B1);
-
-    pinMode(IR_LF_LEFT, INPUT);
-    pinMode(IR_LF_RIGHT, INPUT);
+    // Since the front sensor has a inverted logic, we need to set it to HIGH
+    irSensors[IR_FRONT].state = HIGH;
+    irSensors[IR_FRONT].lastStableState = HIGH;
 
     // Example usage with dynamic obstacles
     Coordinates startCoordinates = getCoordinates(START_POSITION);
@@ -380,27 +392,10 @@ void controlRightWheel(int command, int pwmValue = 220)
 
 void driveForward()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_LF_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_LF_RIGHT);
+    int hasLeftSensorDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
+    int hasRightSensorDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
 
-    // If only left line detects a line, turn slightly right to realign
-    // if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
-    // {
-    //     controlLeftWheel(STOP);
-    //     controlRightWheel(GO_FORWARD);
-    // }
-    // // If only right line detects a line, turn slightly left to realign
-    // else if (hasRightSensorDetectedLine && !hasLeftSensorDetectedLine)
-    // {
-    //     controlLeftWheel(GO_FORWARD);
-    //     controlRightWheel(STOP);
-    // }
-    // else
-    // {
-    //     controlLeftWheel(GO_FORWARD);
-    //     controlRightWheel(GO_FORWARD);
-    // }
-    //If both sensors detect a line, drive straight forward
+    // If both sensors detect a line, drive straight forward
     if (hasLeftSensorDetectedLine && hasRightSensorDetectedLine)
     {
         controlLeftWheel(GO_FORWARD);
@@ -417,101 +412,62 @@ void driveForward()
         controlLeftWheel(GO_FORWARD);
         controlRightWheel(STOP);
     }
-     else
-     {
-         controlLeftWheel(STOP);
-         controlRightWheel(STOP);
-     }
 }
 
 void turnLeft()
 {
-    bool rightSensorExitedFirstLine = false;
-    bool rightSensorEnteredSecondLine = false;
-    bool rightSensorExitedSecondLine = false;
-   // int pwmValue = 255; // Start with max PWM value
+    bool hasRightLineFollowerLeftFirstLine = false;
+    bool hasRightLineFollowerEnteredSecondLine = false;
 
-    while (!rightSensorExitedSecondLine && !digitalRead(IR_LF_RIGHT))
+    while (!hasRightLineFollowerEnteredSecondLine)
     {
-        // Read from the right sensor
-        int hasRightSensorDetectedLine = digitalRead(IR_INTERSECTION_RIGHT);
-
-        // Check if the right sensor has exited the first line
-        if (!rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
+        bool hasRightLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
+        if (!hasRightLineFollowerLeftFirstLine && !hasRightLineFollowerDetectedLine)
         {
-            rightSensorExitedFirstLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
+            hasRightLineFollowerLeftFirstLine = true;
+        }
+        if (hasRightLineFollowerLeftFirstLine && !hasRightLineFollowerEnteredSecondLine && hasRightLineFollowerDetectedLine)
+        {
+            hasRightLineFollowerEnteredSecondLine = true;
         }
 
-        // Check if the right sensor has entered the second line
-        if (rightSensorExitedFirstLine && !rightSensorEnteredSecondLine && hasRightSensorDetectedLine)
-        {
-            rightSensorEnteredSecondLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
-        }
-
-        // Check if the right sensor has exited the second line
-        if (rightSensorEnteredSecondLine && !rightSensorExitedSecondLine && !hasRightSensorDetectedLine)
-        {
-            rightSensorExitedSecondLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
-        }
-
-        // Turn left
-        controlLeftWheel(GO_BACK,190);
-        controlRightWheel(GO_FORWARD, 190);
+        controlLeftWheel(GO_BACK, 200);
+        controlRightWheel(GO_FORWARD, 200);
     }
 }
 
 void turnRight()
 {
-    bool leftSensorExitedFirstLine = false;
-    bool leftSensorEnteredSecondLine = false;
-    bool leftSensorExitedSecondLine = false;
-    //int pwmValue = 255; // Start with max PWM value
+    bool hasLeftLineFollowerLeftFirstLine = false;
+    bool hasLeftLineFollowerEnteredSecondLine = false;
 
-    while (!leftSensorExitedSecondLine && !digitalRead(IR_LF_LEFT))
+    while (!hasLeftLineFollowerEnteredSecondLine)
     {
-        // Read from the left sensor
-        int hasLeftSensorDetectedLine = digitalRead(IR_INTERSECTION_LEFT);
-
-        // Check if the left sensor has exited the first line
-        if (!leftSensorExitedFirstLine && !hasLeftSensorDetectedLine)
+        bool hasLeftLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
+        if (!hasLeftLineFollowerLeftFirstLine && !hasLeftLineFollowerDetectedLine)
         {
-            leftSensorExitedFirstLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
+            hasLeftLineFollowerLeftFirstLine = true;
+        }
+        if (hasLeftLineFollowerLeftFirstLine && !hasLeftLineFollowerEnteredSecondLine && hasLeftLineFollowerDetectedLine)
+        {
+            hasLeftLineFollowerEnteredSecondLine = true;
         }
 
-        // Check if the left sensor has entered the second line
-        if (leftSensorExitedFirstLine && !leftSensorEnteredSecondLine && hasLeftSensorDetectedLine)
-        {
-            leftSensorEnteredSecondLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
-        }
-
-        // Check if the left sensor has exited the second line
-        if (leftSensorEnteredSecondLine && !leftSensorExitedSecondLine && !hasLeftSensorDetectedLine)
-        {
-            leftSensorExitedSecondLine = true;
-            //pwmValue -= pwmValue * 0.10; // Reduce PWM value by 5%
-        }
-
-        // Turn right
-        controlLeftWheel(GO_FORWARD, 190);
-        controlRightWheel(GO_BACK,190);
+        controlLeftWheel(GO_FORWARD, 200);
+        controlRightWheel(GO_BACK, 200);
     }
 }
 
 bool isThereObstacle()
 {
-    int hasFrontSensorDetectedObstacle = !digitalRead(IR_FRONT);
+    int hasFrontSensorDetectedObstacle = !debounceRead(irSensors[IR_FRONT]);
     return hasFrontSensorDetectedObstacle;
 }
 
 bool isThereIntersection()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_INTERSECTION_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_INTERSECTION_RIGHT);
+    int hasLeftSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_LEFT]);
+    int hasRightSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_RIGHT]);
     return hasLeftSensorDetectedLine && hasRightSensorDetectedLine;
 }
 
@@ -695,8 +651,8 @@ void deletePath(Node *node)
 
 void driveBackward()
 {
-    int hasLeftSensorDetectedLine = digitalRead(IR_LF_LEFT);
-    int hasRightSensorDetectedLine = digitalRead(IR_LF_RIGHT);
+    int hasLeftSensorDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
+    int hasRightSensorDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
 
     // If both sensors detect a line, drive straight backward
     if (hasLeftSensorDetectedLine && hasRightSensorDetectedLine)
@@ -718,33 +674,13 @@ void driveBackward()
     }
 }
 
-bool debounceRead(int pin)
-{
-    int reading = digitalRead(pin);
-    static int lastReading = LOW;
-    static bool debouncedReading = LOW;
-
-    if (reading != lastReading) {
-        lastDebounceTime = millis();
-    }
-
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-        if (reading != debouncedReading) {
-            debouncedReading = reading;
-        }
-    }
-
-    lastReading = reading;
-    return debouncedReading;
-}
-
 void turnAround()
 {
-    // Assume we're turning right
     bool rightSensorExitedFirstLine = false;
     bool rightSensorEnteredSecondLine = false;
-    while(!rightSensorEnteredSecondLine){
-        bool hasRightSensorDetectedLine = debounceRead(IR_LF_RIGHT);
+    while (!rightSensorEnteredSecondLine)
+    {
+        bool hasRightSensorDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
         if (!rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
         {
             rightSensorExitedFirstLine = true;
@@ -760,12 +696,6 @@ void turnAround()
 
     // Update the direction to be the opposite of what it was before
     currentDirection = (currentDirection + 2) % 4;
-
-    // Drive until the intersection
-    while (!isThereIntersection())
-    {
-        driveForward();
-    }
 }
 
 void goBackToIntersection()
@@ -778,6 +708,10 @@ void goBackToIntersection()
 
 void loop()
 {
+    for (int i = 0; i < NUM_IR_SENSORS; i++)
+    {
+        debounceRead(irSensors[i]);
+    }
 
     driveForward();
     if (isThereObstacle())
@@ -785,6 +719,7 @@ void loop()
         Serial.println("Obstacle detected! Returning to intersection.");
         goBackToIntersection();
         Serial.println("Returned to intersection.");
+        irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
         handleObstacleAndRecalculateRoute();
         if (currentDirection != nextDirection)
         {
