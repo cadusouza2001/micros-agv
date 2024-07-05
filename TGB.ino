@@ -7,8 +7,11 @@
  * - Carlos Eduardo
  * - Klaus Becker
  */
+
 #define START_POSITION 'H'
 #define END_POSITION '3'
+#define MOTOR_SPEED 190
+
 // Define the possible facing directions
 enum
 {
@@ -35,6 +38,13 @@ enum IRSensorType
     NUM_IR_SENSORS
 };
 
+enum {
+    STATE_DRIVE_FORWARD,
+    STATE_TURN_DIRECTION,
+    STATE_TURN_AROUND,
+    STATE_STOP
+};
+
 // Left wheel motor control pins
 const int LEFT_WHEEL_MOVE_FORWARD_PIN = 5;
 const int LEFT_WHEEL_MOVE_BACKWARD_PIN = 6;
@@ -45,7 +55,7 @@ const int RIGHT_WHEEL_MOVE_BACKWARD_PIN = 10;
 
 // Infrared sensor pins
 const int IR_SENSOR_PINS[] = {11,  // IR_LF_LEFT
-                              7,  // IR_LF_RIGHT
+                              13,  // IR_LF_RIGHT
                               2,   // IR_INTERSECTION_LEFT
                               3,   // IR_INTERSECTION_RIGHT
                               12}; // IR_FRONT
@@ -83,7 +93,9 @@ const int cols = 11;
 
 Sensor irSensors[NUM_IR_SENSORS];
 
-const unsigned long debounceDelay = 10;
+const unsigned long debounceDelay = 5;
+
+static int state = STATE_DRIVE_FORWARD;
 
 bool debounceRead(struct Sensor &sensor)
 {
@@ -352,7 +364,7 @@ void setup()
     printDirection(currentDirection);
 }
 
-void controlLeftWheel(int command, int pwmValue = 170)
+void controlLeftWheel(int command, int pwmValue = MOTOR_SPEED)
 {
     switch (command)
     {
@@ -371,7 +383,7 @@ void controlLeftWheel(int command, int pwmValue = 170)
     }
 }
 
-void controlRightWheel(int command, int pwmValue = 170)
+void controlRightWheel(int command, int pwmValue = MOTOR_SPEED)
 {
     switch (command)
     {
@@ -416,13 +428,18 @@ void driveForward()
 
 void turnLeft()
 {
+    bool isRightLineFollowerOnTopOfFirstLine = false;
     bool hasRightLineFollowerLeftFirstLine = false;
     bool hasRightLineFollowerEnteredSecondLine = false;
 
     while (!hasRightLineFollowerEnteredSecondLine)
     {
-        bool hasRightLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
-        if (!hasRightLineFollowerLeftFirstLine && !hasRightLineFollowerDetectedLine)
+        bool hasRightLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
+        if(!isRightLineFollowerOnTopOfFirstLine && hasRightLineFollowerDetectedLine)
+        {
+            isRightLineFollowerOnTopOfFirstLine = true;
+        }
+        if (isRightLineFollowerOnTopOfFirstLine && !hasRightLineFollowerLeftFirstLine && !hasRightLineFollowerDetectedLine)
         {
             hasRightLineFollowerLeftFirstLine = true;
         }
@@ -431,20 +448,25 @@ void turnLeft()
             hasRightLineFollowerEnteredSecondLine = true;
         }
 
-        controlLeftWheel(GO_BACK, 170);
-        controlRightWheel(GO_FORWARD, 170);
+        controlLeftWheel(GO_BACK, MOTOR_SPEED);
+        controlRightWheel(GO_FORWARD, MOTOR_SPEED);
     }
 }
 
 void turnRight()
 {
+    bool isLeftLineFollowerOnTopOfFirstLine = false;
     bool hasLeftLineFollowerLeftFirstLine = false;
     bool hasLeftLineFollowerEnteredSecondLine = false;
 
     while (!hasLeftLineFollowerEnteredSecondLine)
     {
-        bool hasLeftLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
-        if (!hasLeftLineFollowerLeftFirstLine && !hasLeftLineFollowerDetectedLine)
+        bool hasLeftLineFollowerDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
+        if(!isLeftLineFollowerOnTopOfFirstLine && hasLeftLineFollowerDetectedLine)
+        {
+            isLeftLineFollowerOnTopOfFirstLine = true;
+        }
+        if (isLeftLineFollowerOnTopOfFirstLine && !hasLeftLineFollowerLeftFirstLine && !hasLeftLineFollowerDetectedLine)
         {
             hasLeftLineFollowerLeftFirstLine = true;
         }
@@ -453,22 +475,24 @@ void turnRight()
             hasLeftLineFollowerEnteredSecondLine = true;
         }
 
-        controlLeftWheel(GO_FORWARD, 170);
-        controlRightWheel(GO_BACK, 170);
+        controlLeftWheel(GO_FORWARD, MOTOR_SPEED);
+        controlRightWheel(GO_BACK, MOTOR_SPEED);
     }
 }
 
 bool isThereObstacle()
 {
-    int hasFrontSensorDetectedObstacle = !debounceRead(irSensors[IR_FRONT]);
+    bool hasFrontSensorDetectedObstacle = !debounceRead(irSensors[IR_FRONT]);
+    //Serial.print("Front sensor: ");
+    //Serial.println(hasFrontSensorDetectedObstacle);
     return hasFrontSensorDetectedObstacle;
 }
 
 bool isThereIntersection()
 {
     int hasLeftSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_LEFT]);
-    int hasRightSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_RIGHT]);
-    return hasLeftSensorDetectedLine && hasRightSensorDetectedLine;
+    //int hasRightSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_RIGHT]);
+    return hasLeftSensorDetectedLine;
 }
 
 void updateCurrentPosition()
@@ -553,7 +577,6 @@ void turnToNewDirection()
     else if (directionDifference == 2 || directionDifference == -2)
     {
         turnRight();
-        goBackToIntersection();
         turnRight();
     }
 
@@ -680,7 +703,7 @@ void turnAround()
     bool rightSensorEnteredSecondLine = false;
     while (!rightSensorEnteredSecondLine)
     {
-        bool hasRightSensorDetectedLine = debounceRead(irSensors[IR_LF_RIGHT]);
+        bool hasRightSensorDetectedLine = debounceRead(irSensors[IR_LF_LEFT]);
         if (!rightSensorExitedFirstLine && !hasRightSensorDetectedLine)
         {
             rightSensorExitedFirstLine = true;
@@ -690,55 +713,124 @@ void turnAround()
             rightSensorEnteredSecondLine = true;
         }
 
-        controlLeftWheel(GO_FORWARD);
-        controlRightWheel(GO_BACK);
+        controlLeftWheel(GO_BACK);
+        controlRightWheel(GO_FORWARD);
     }
 
     // Update the direction to be the opposite of what it was before
     currentDirection = (currentDirection + 2) % 4;
+
+    Serial.print("Turned around. New direction: ");
+    printDirection(currentDirection);
 }
 
 void goBackToIntersection()
 {
+    turnAround();
     while (!isThereIntersection())
     {
-        driveBackward();
+        driveForward();
+    }
+}
+
+void printState(int state)
+{
+    switch (state)
+    {
+    case STATE_DRIVE_FORWARD:
+        Serial.print("STATE_DRIVE_FORWARD");
+        break;
+    case STATE_TURN_DIRECTION:
+        Serial.print("STATE_TURN_DIRECTION");
+        break;
+    case STATE_TURN_AROUND:
+        Serial.print("STATE_TURN_AROUND");
+        break;
+    case STATE_STOP:
+        Serial.print("STATE_STOP");
+        break;
     }
 }
 
 void loop()
 {
-    for (int i = 0; i < NUM_IR_SENSORS; i++)
-    {
-        debounceRead(irSensors[i]);
-    }
+    static int lastState = STATE_DRIVE_FORWARD;
 
-    driveForward();
-    if (isThereObstacle())
+    
+
+    switch (state)
     {
-        Serial.println("Obstacle detected! Returning to intersection.");
-        goBackToIntersection();
-        Serial.println("Returned to intersection.");
-        irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
-        handleObstacleAndRecalculateRoute();
-        if (currentDirection != nextDirection)
-        {
-            turnToNewDirection();
-        }
-    }
-    else if (isThereIntersection())
-    {
-        updateCurrentPosition();
-        if (currentDirection != nextDirection)
-        {
-            turnToNewDirection();
-        }
-        else
-        {
-            while (isThereIntersection())
-            {
+    case STATE_DRIVE_FORWARD:
+        driveForward();
+        if (isThereObstacle()) {
+            state = STATE_TURN_AROUND;
+        } else if (isThereIntersection()) {
+            while (isThereIntersection()) {
                 driveForward();
             }
+            updateCurrentPosition();
+            if (currentDirection != nextDirection) {
+                state = STATE_TURN_DIRECTION;
+            }
+            if (path->parent->parent == NULL) {
+                state = STATE_STOP;
+            }
         }
+        break;
+    
+    case STATE_TURN_DIRECTION:
+        turnToNewDirection();
+        state = STATE_DRIVE_FORWARD;
+        break;
+    
+    case STATE_TURN_AROUND:
+        turnAround();
+        irSensors[IR_FRONT].state = !irSensors[IR_FRONT].state;
+        irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
+        handleObstacleAndRecalculateRoute();
+        state = STATE_DRIVE_FORWARD;
+        break;
+    case STATE_STOP:
+        while (debounceRead(irSensors[IR_LF_LEFT]) || debounceRead(irSensors[IR_LF_RIGHT])) {
+            driveForward();
+        }
+        controlLeftWheel(STOP);
+        controlRightWheel(STOP);
+        break;
     }
+
+    if (state != lastState) {
+        printState(lastState); Serial.print(" -> "); 
+        printState(state); Serial.println();
+    }
+    lastState = state;    
+    // driveForward();
+    // if (isThereObstacle())
+    // {
+    //     Serial.println("Obstacle detected! Returning to intersection.");
+    //     goBackToIntersection();
+    //     Serial.println("Returned to intersection.");
+    //     irSensors[IR_FRONT].state = !irSensors[IR_FRONT].state;
+    //     irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
+    //     handleObstacleAndRecalculateRoute();
+    //     if (currentDirection != nextDirection)
+    //     {
+    //         turnToNewDirection();
+    //     }
+    // }
+    // else if (isThereIntersection())
+    // {
+    //     updateCurrentPosition();
+    //     if (currentDirection != nextDirection)
+    //     {
+    //         turnToNewDirection();
+    //     }
+    //     else
+    //     {
+    //         while (isThereIntersection())
+    //         {
+    //             driveForward();
+    //         }
+    //     }
+    // }
 }
