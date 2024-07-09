@@ -10,7 +10,9 @@
 
 #define START_POSITION 'H'
 #define END_POSITION '3'
-#define MOTOR_SPEED 190
+#define FORWARD_SPEED 200
+#define TURN_SPEED 200
+#define BACKWARD_SPEED 170
 
 // Define the possible facing directions
 enum
@@ -41,7 +43,7 @@ enum IRSensorType
 enum {
     STATE_DRIVE_FORWARD,
     STATE_TURN_DIRECTION,
-    STATE_TURN_AROUND,
+    STATE_GO_BACK,
     STATE_STOP
 };
 
@@ -93,7 +95,7 @@ const int cols = 11;
 
 Sensor irSensors[NUM_IR_SENSORS];
 
-const unsigned long debounceDelay = 5;
+const unsigned long debounceDelay = 10;
 
 static int state = STATE_DRIVE_FORWARD;
 
@@ -364,7 +366,7 @@ void setup()
     printDirection(currentDirection);
 }
 
-void controlLeftWheel(int command, int pwmValue = MOTOR_SPEED)
+void controlLeftWheel(int command, int pwmValue = FORWARD_SPEED)
 {
     switch (command)
     {
@@ -383,7 +385,7 @@ void controlLeftWheel(int command, int pwmValue = MOTOR_SPEED)
     }
 }
 
-void controlRightWheel(int command, int pwmValue = MOTOR_SPEED)
+void controlRightWheel(int command, int pwmValue = FORWARD_SPEED)
 {
     switch (command)
     {
@@ -448,8 +450,8 @@ void turnLeft()
             hasRightLineFollowerEnteredSecondLine = true;
         }
 
-        controlLeftWheel(GO_BACK, MOTOR_SPEED);
-        controlRightWheel(GO_FORWARD, MOTOR_SPEED);
+        controlLeftWheel(GO_BACK, TURN_SPEED);
+        controlRightWheel(GO_FORWARD, TURN_SPEED);
     }
 }
 
@@ -475,8 +477,8 @@ void turnRight()
             hasLeftLineFollowerEnteredSecondLine = true;
         }
 
-        controlLeftWheel(GO_FORWARD, MOTOR_SPEED);
-        controlRightWheel(GO_BACK, MOTOR_SPEED);
+        controlLeftWheel(GO_FORWARD, TURN_SPEED);
+        controlRightWheel(GO_BACK, TURN_SPEED);
     }
 }
 
@@ -512,7 +514,7 @@ void updateCurrentPosition()
         thirdToLast = secondToLast;
         secondToLast = last;
         last = last->parent;
-    }
+    } 
 
     if (last != NULL)
     {
@@ -564,6 +566,11 @@ int getNextDirection(Node *nextPosition, Node *currentPosition)
 
 void turnToNewDirection()
 {
+    irSensors[IR_LF_LEFT].state = false;
+    irSensors[IR_LF_LEFT].lastStableState = false;
+    irSensors[IR_LF_RIGHT].state = false;
+    irSensors[IR_LF_RIGHT].lastStableState = false;
+
     int directionDifference = nextDirection - currentDirection;
 
     if (directionDifference == 1 || directionDifference == -3)
@@ -580,9 +587,15 @@ void turnToNewDirection()
         turnRight();
     }
 
+
     currentDirection = nextDirection;
     Serial.print("Turned to new direction: ");
     printDirection(currentDirection);
+
+    unsigned long startTime = millis();
+    do {
+        driveForward();
+    } while (millis() - startTime < 1500);
 }
 
 void printDirection(int direction)
@@ -680,20 +693,20 @@ void driveBackward()
     // If both sensors detect a line, drive straight backward
     if (hasLeftSensorDetectedLine && hasRightSensorDetectedLine)
     {
-        controlLeftWheel(GO_BACK);
-        controlRightWheel(GO_BACK);
+        controlLeftWheel(GO_BACK, BACKWARD_SPEED);
+        controlRightWheel(GO_BACK, BACKWARD_SPEED);
     }
     // If only the left sensor detects a line, turn slightly left to realign
     else if (hasLeftSensorDetectedLine && !hasRightSensorDetectedLine)
     {
-        controlLeftWheel(STOP);
-        controlRightWheel(GO_BACK);
+        controlLeftWheel(GO_BACK, BACKWARD_SPEED);
+        controlRightWheel(STOP);
     }
     // If only the right sensor detects a line, turn slightly right to realign
     else if (hasRightSensorDetectedLine && !hasLeftSensorDetectedLine)
     {
-        controlLeftWheel(GO_BACK);
-        controlRightWheel(STOP);
+        controlLeftWheel(STOP);
+        controlRightWheel(GO_BACK, BACKWARD_SPEED);
     }
 }
 
@@ -726,11 +739,16 @@ void turnAround()
 
 void goBackToIntersection()
 {
-    turnAround();
     while (!isThereIntersection())
     {
-        driveForward();
+        driveBackward();
     }
+    controlLeftWheel(STOP);
+    controlRightWheel(STOP);
+    delay(500);
+    irSensors[IR_INTERSECTION_LEFT].state = false;
+    irSensors[IR_INTERSECTION_LEFT].lastStableState = false;
+    
 }
 
 void printState(int state)
@@ -743,8 +761,8 @@ void printState(int state)
     case STATE_TURN_DIRECTION:
         Serial.print("STATE_TURN_DIRECTION");
         break;
-    case STATE_TURN_AROUND:
-        Serial.print("STATE_TURN_AROUND");
+    case STATE_GO_BACK:
+        Serial.print("STATE_GO_BACK");
         break;
     case STATE_STOP:
         Serial.print("STATE_STOP");
@@ -763,7 +781,7 @@ void loop()
     case STATE_DRIVE_FORWARD:
         driveForward();
         if (isThereObstacle()) {
-            state = STATE_TURN_AROUND;
+            state = STATE_GO_BACK;
         } else if (isThereIntersection()) {
             while (isThereIntersection()) {
                 driveForward();
@@ -772,7 +790,7 @@ void loop()
             if (currentDirection != nextDirection) {
                 state = STATE_TURN_DIRECTION;
             }
-            if (path->parent->parent == NULL) {
+            if (path->parent == NULL) {
                 state = STATE_STOP;
             }
         }
@@ -783,12 +801,13 @@ void loop()
         state = STATE_DRIVE_FORWARD;
         break;
     
-    case STATE_TURN_AROUND:
-        turnAround();
+    case STATE_GO_BACK:
+        goBackToIntersection();
+        //Reset the front sensor state to avoid false positives
         irSensors[IR_FRONT].state = !irSensors[IR_FRONT].state;
         irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
         handleObstacleAndRecalculateRoute();
-        state = STATE_DRIVE_FORWARD;
+        state = STATE_TURN_DIRECTION;
         break;
     case STATE_STOP:
         while (debounceRead(irSensors[IR_LF_LEFT]) || debounceRead(irSensors[IR_LF_RIGHT])) {
@@ -804,33 +823,4 @@ void loop()
         printState(state); Serial.println();
     }
     lastState = state;    
-    // driveForward();
-    // if (isThereObstacle())
-    // {
-    //     Serial.println("Obstacle detected! Returning to intersection.");
-    //     goBackToIntersection();
-    //     Serial.println("Returned to intersection.");
-    //     irSensors[IR_FRONT].state = !irSensors[IR_FRONT].state;
-    //     irSensors[IR_FRONT].lastStableState = !irSensors[IR_FRONT].lastStableState;
-    //     handleObstacleAndRecalculateRoute();
-    //     if (currentDirection != nextDirection)
-    //     {
-    //         turnToNewDirection();
-    //     }
-    // }
-    // else if (isThereIntersection())
-    // {
-    //     updateCurrentPosition();
-    //     if (currentDirection != nextDirection)
-    //     {
-    //         turnToNewDirection();
-    //     }
-    //     else
-    //     {
-    //         while (isThereIntersection())
-    //         {
-    //             driveForward();
-    //         }
-    //     }
-    // }
 }
