@@ -34,8 +34,7 @@ enum IRSensorType
 {
     IR_LF_LEFT,
     IR_LF_RIGHT,
-    IR_INTERSECTION_LEFT,
-    IR_INTERSECTION_RIGHT,
+    IR_INTERSECTION,
     IR_FRONT,
     NUM_IR_SENSORS
 };
@@ -59,8 +58,7 @@ const int RIGHT_WHEEL_MOVE_BACKWARD_PIN = 10;
 // Infrared sensor pins
 const int IR_SENSOR_PINS[] = {11,  // IR_LF_LEFT
                               13,  // IR_LF_RIGHT
-                              2,   // IR_INTERSECTION_LEFT
-                              3,   // IR_INTERSECTION_RIGHT
+                              2,   // IR_INTERSECTION
                               12}; // IR_FRONT
 
 int currentDirection;
@@ -493,9 +491,8 @@ bool isThereObstacle()
 
 bool isThereIntersection()
 {
-    int hasLeftSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_LEFT]);
-    // int hasRightSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION_RIGHT]);
-    return hasLeftSensorDetectedLine;
+    int hasIntersectionSensorDetectedLine = debounceRead(irSensors[IR_INTERSECTION]);
+    return hasIntersectionSensorDetectedLine;
 }
 
 void updateCurrentPosition()
@@ -742,8 +739,8 @@ void goBackToIntersection()
     controlLeftWheel(STOP);
     controlRightWheel(STOP);
     delay(500);
-    irSensors[IR_INTERSECTION_LEFT].state = false;
-    irSensors[IR_INTERSECTION_LEFT].lastStableState = false;
+    irSensors[IR_INTERSECTION].state = false;
+    irSensors[IR_INTERSECTION].lastStableState = false;
 }
 
 void printState(int state)
