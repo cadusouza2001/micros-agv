@@ -1,0 +1,25 @@
+@startuml
+!theme plain
+
+start
+:Detecta obstáculo;
+:Volta para a última interseção andando para trás;
+:Reseta estado do sensor frontal para evitar falsos positivos;
+:Tenta recalcular rota considerando o obstáculo;
+
+if (Caminho é muito curto para recalcular?) then (sim)
+  :Não é possível recalcular;
+  stop
+else (não)
+  :Calcula posição do obstáculo entre os dois últimos nós;
+  :Marca posição como obstáculo;
+  :Recalcula rota usando A* do último nó válido até o destino;
+  :Atualiza caminho com a nova rota;
+  :Imprime caminho recalculado;
+  :Determina próxima direção baseada no novo caminho;
+  :Imprime direções atual e próxima;
+endif
+
+:Atualiza estado para mudar direção;
+stop
+@enduml

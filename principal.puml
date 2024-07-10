@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+
+start
+:Inicializa comunicação serial;
+:Configura pinos dos motores e sensores IR;
+:Ajusta estado inicial dos sensores IR;
+:Obtém coordenadas de início e fim;
+:Calcula caminho inicial usando A*;
+:Define direção inicial e próxima direção;
+:Imprime caminho e direção inicial;
+:Inicia com estado DIRIGIR_PARA_FRENTE;
+
+repeat
+    if (Estado atual é DIRIGIR_PARA_FRENTE) then (sim)
+        :Dirige para frente;
+        if (Detecta obstáculo) then (sim)
+            :Muda estado para VOLTAR;
+        elseif (Detecta interseção) then (sim)
+            :Atualiza posição atual;
+            if (Direção atual != Próxima direção) then (sim)
+                :Muda estado para MUDAR_DIREÇÃO;
+            endif
+            if (Fim do caminho) then (sim)
+                :Muda estado para PARAR;
+            endif
+        endif
+    elseif (Estado atual é MUDAR_DIREÇÃO) then (sim)
+        :Gira para nova direção;
+        :Muda estado para DIRIGIR_PARA_FRENTE;
+    elseif (Estado atual é VOLTAR) then (sim)
+        :Volta para interseção anterior;
+        :Reseta estado do sensor frontal;
+        :Recalcula rota;
+        :Muda estado para MUDAR_DIREÇÃO;
+    elseif (Estado atual é PARAR) then (sim)
+        :Para os motores;
+        :Espera até que sensores laterais parem de detectar linha;
+        stop
+    endif
+@enduml

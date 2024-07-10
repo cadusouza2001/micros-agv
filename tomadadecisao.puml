@@ -1,0 +1,35 @@
+@startuml
+start
+:Início do algoritmo A*;
+
+:Inicializa o nó inicial e adiciona à lista de nós a serem explorados;
+
+while (Existem nós na lista a serem explorados?) is (sim)
+  :Seleciona o nó com menor custo estimado (f = g + h);
+  :Remove o nó selecionado da lista de nós a serem explorados;
+  :Marca o nó como explorado;
+
+  if (Nó atual é o nó objetivo?) then (sim)
+    :Caminho encontrado!;
+    stop
+  endif
+
+  :Gera possíveis movimentos para nós vizinhos;
+
+  while (Existem vizinhos não processados?) is (sim)
+    :Calcula a posição do vizinho;
+
+    if (Movimento para o vizinho é válido?) then (sim)
+      if (Vizinho não foi explorado?) then (sim)
+        :Cria um novo nó vizinho;
+        :Calcula custo do caminho (g) e estimativa até o objetivo (h);
+        :Adiciona nó vizinho à lista de nós a serem explorados se for uma alternativa melhor;
+      endif
+    endif
+  endwhile
+endwhile
+
+:Caminho não encontrado;
+stop
+
+@enduml
