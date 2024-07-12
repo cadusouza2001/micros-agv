@@ -43,14 +43,14 @@ O robô deve realizar todas as tarefas listadas no Capítulo 3. A avaliação se
 
 Este fluxograma descreve o algoritmo para o AGV executar o caminho pré-determinado. Ele inclui etapas para ler o caminho, calcular o próximo movimento e ajustar a posição do AGV de acordo.
 
-## Fluxograma 3: Sistema anti-colisão
+## Fluxograma 2: Sistema anti-colisão
 
-![Fluxograma 3](/files/anti-colisao.svg)
+![Fluxograma 2](/files/anti-colisao.svg)
 
 Este fluxograma demonstra o algoritmo para o sistema anti-colisão do AGV. Ele inclui etapas para detectar obstáculos, calcular caminhos alternativos e evitar colisões com outros robôs ou obstáculos.
 
-## Fluxograma 4: Sistema de tomada de decisão
+## Fluxograma 3: Sistema de tomada de decisão
 
-![Fluxograma 4](/files/tomadadecisao.svg)
+![Fluxograma 3](/files/tomadadecisao.svg)
 
 Este fluxograma apresenta o algoritmo para o sistema de tomada de decisão do AGV. Ele inclui etapas para analisar a situação atual, avaliar possíveis ações e selecionar a decisão ótima para alcançar o objetivo do AGV.
